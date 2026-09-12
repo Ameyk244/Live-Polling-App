@@ -19,6 +19,7 @@ def _poll_payload(poll) -> dict:
         "code": poll.code,
         "question": poll.question,
         "status": poll.status,
+        "expires_at": poll.expires_at.isoformat() if poll.expires_at else None,
         "options": [
             {"id": o.id, "text": o.text, "position": o.position} for o in poll.options
         ],
@@ -38,11 +39,8 @@ async def join_poll(sid, raw_payload):
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
 
-        poll, participant, token = await run_in_threadpool(
-            poll_service.join_poll,
-            db,
-            poll_code=payload.poll_code,
-            display_name=payload.display_name,
+        poll, participant, token = await poll_service.join_poll(
+            db, poll_code=payload.poll_code, display_name=payload.display_name
         )
         tally = await run_in_threadpool(poll_service.get_tally, db, poll.id)
 
@@ -76,7 +74,7 @@ async def join_as_host(sid, raw_payload):
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
 
-        poll, _claims = await run_in_threadpool(poll_service.join_as_host, db, payload.token)
+        poll, _claims = await poll_service.join_as_host(db, payload.token)
         tally = await run_in_threadpool(poll_service.get_tally, db, poll.id)
 
         await sio.enter_room(sid, poll.code)
@@ -107,8 +105,7 @@ async def submit_answer(sid, raw_payload):
 
         claims = auth_service.authorize_participant(payload.token)
 
-        result = await run_in_threadpool(
-            answer_service.submit_answer,
+        result = await answer_service.submit_answer(
             db,
             poll_id=claims.poll_id,
             participant_id=claims.participant_id,

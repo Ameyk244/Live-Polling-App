@@ -7,8 +7,14 @@ from app.models.poll import Poll
 from app.models.poll_option import PollOption
 
 
-def create_poll(db: Session, code: str, question: str, options: list[str]) -> Poll:
-    poll = Poll(code=code, question=question, status="open")
+def create_poll(
+    db: Session,
+    code: str,
+    question: str,
+    options: list[str],
+    expires_at: datetime | None = None,
+) -> Poll:
+    poll = Poll(code=code, question=question, status="open", expires_at=expires_at)
     poll.options = [
         PollOption(text=text, position=index) for index, text in enumerate(options)
     ]

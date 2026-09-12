@@ -17,6 +17,7 @@ class Poll(Base):
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     options = relationship(
         "PollOption", back_populates="poll", cascade="all, delete-orphan", order_by="PollOption.position"

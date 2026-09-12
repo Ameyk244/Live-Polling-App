@@ -18,6 +18,7 @@ class PollResponse(BaseModel):
     status: str
     created_at: datetime
     closed_at: datetime | None
+    expires_at: datetime | None
     options: list[PollOptionResponse]
 
     model_config = {"from_attributes": True}
@@ -26,6 +27,7 @@ class PollResponse(BaseModel):
 class CreatePollRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     options: list[str] = Field(min_length=2)
+    duration_minutes: int | None = Field(default=None, ge=1, le=1440)
 
     @field_validator("options")
     @classmethod

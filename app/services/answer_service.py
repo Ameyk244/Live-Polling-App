@@ -2,11 +2,13 @@ import logging
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.exceptions import AlreadyAnsweredError, InvalidOptionError, NotFoundError, PollClosedError
 from app.core.rate_limiter import check_submit_cooldown, record_submit
 from app.repositories import answer_repository, poll_repository
 from app.schemas.poll import OptionTally
+from app.services import poll_service
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +19,9 @@ class SubmitAnswerResult:
     tally: list[OptionTally]
 
 
-def submit_answer(
-    db: Session, poll_id: int, participant_id: int, option_id: int
+def _submit_answer_sync(
+    db: Session, poll_id: int, poll_code: str, participant_id: int, option_id: int
 ) -> SubmitAnswerResult:
-    poll = poll_repository.get_poll_by_id(db, poll_id)
-    if poll is None:
-        raise NotFoundError("Poll not found")
-    if poll.status != "open":
-        raise PollClosedError("This poll is closed")
-
     option = answer_repository.get_option(db, option_id, poll_id)
     if option is None:
         raise InvalidOptionError("Selected option does not belong to this poll")
@@ -49,4 +45,17 @@ def submit_answer(
         OptionTally(option_id=opt.id, text=opt.text, position=opt.position, count=count)
         for opt, count in rows
     ]
-    return SubmitAnswerResult(poll_code=poll.code, tally=tally)
+    return SubmitAnswerResult(poll_code=poll_code, tally=tally)
+
+
+async def submit_answer(
+    db: Session, poll_id: int, participant_id: int, option_id: int
+) -> SubmitAnswerResult:
+    poll = await run_in_threadpool(poll_repository.get_poll_by_id, db, poll_id)
+    if poll is None:
+        raise NotFoundError("Poll not found")
+    poll = await poll_service.enforce_expiry(db, poll)
+    if poll.status != "open":
+        raise PollClosedError("This poll is closed")
+
+    return await run_in_threadpool(_submit_answer_sync, db, poll_id, poll.code, participant_id, option_id)

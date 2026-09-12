@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.database import get_db
 from app.schemas.poll import (
@@ -17,21 +18,26 @@ bearer_scheme = HTTPBearer()
 
 @router.post("", response_model=CreatePollResponse)
 def create_poll(body: CreatePollRequest, db: Session = Depends(get_db)):
-    poll, host_token = poll_service.create_poll(db, question=body.question, options=body.options)
+    poll, host_token = poll_service.create_poll(
+        db, question=body.question, options=body.options, duration_minutes=body.duration_minutes
+    )
     return CreatePollResponse(
         code=poll.code, host_token=host_token, poll=PollResponse.model_validate(poll)
     )
 
 
 @router.get("/{code}", response_model=PollResponse)
-def get_poll(code: str, db: Session = Depends(get_db)):
-    poll = poll_service.get_poll_by_code(db, code)
+async def get_poll(code: str, db: Session = Depends(get_db)):
+    poll = await run_in_threadpool(poll_service.get_poll_by_code, db, code)
+    poll = await poll_service.enforce_expiry(db, poll)
     return PollResponse.model_validate(poll)
 
 
 @router.get("/{code}/results", response_model=PollResultsResponse)
-def get_results(code: str, db: Session = Depends(get_db)):
-    poll, tally = poll_service.get_results(db, code)
+async def get_results(code: str, db: Session = Depends(get_db)):
+    poll = await run_in_threadpool(poll_service.get_poll_by_code, db, code)
+    poll = await poll_service.enforce_expiry(db, poll)
+    tally = await run_in_threadpool(poll_service.get_tally, db, poll.id)
     return PollResultsResponse(code=poll.code, question=poll.question, status=poll.status, tally=tally)
 
 

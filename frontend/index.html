@@ -274,6 +274,10 @@
       <label>Options</label>
       <div id="host-options"></div>
       <button type="button" class="btn-secondary" id="host-add-option">+ Add option</button>
+
+      <label for="host-duration">Duration (minutes, optional)</label>
+      <input type="text" id="host-duration" placeholder="e.g. 30 — leave blank to never auto-close" />
+
       <br />
       <button type="button" class="btn-primary" id="host-create-btn">Create Poll</button>
       <div class="error-line" id="host-create-error"></div>
@@ -292,6 +296,7 @@
     <div class="card hidden" id="host-live-block">
       <div class="code-display" id="host-code"></div>
       <div class="question-display" id="host-question-display"></div>
+      <div class="status-line hidden" id="host-expires-line"></div>
       <div id="host-tally"></div>
       <button type="button" class="btn-danger-outline" id="host-close-btn">Close Poll</button>
       <div class="error-line" id="host-error"></div>
@@ -326,6 +331,7 @@
 
     <div class="card hidden" id="join-live-block">
       <div class="question-display" id="participant-question-display"></div>
+      <div class="status-line hidden" id="participant-expires-line"></div>
       <div id="participant-options"></div>
       <div class="status-line" id="participant-status"></div>
       <div class="error-line" id="participant-error"></div>
@@ -350,6 +356,21 @@
     const div = document.createElement("div");
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  // No live countdown here on purpose — just tells the viewer when the poll
+  // will close, formatted in their own local time. Hidden entirely when the
+  // poll has no expiry set.
+  function renderExpiresLine(elId, expiresAt) {
+    const el = document.getElementById(elId);
+    if (!expiresAt) {
+      el.classList.add("hidden");
+      el.textContent = "";
+      return;
+    }
+    const formatted = new Date(expiresAt).toLocaleTimeString();
+    el.textContent = `Expires at: ${formatted}`;
+    el.classList.remove("hidden");
   }
 
   function renderTallyBars(container, tally) {
@@ -473,16 +494,29 @@
       .map((el) => el.value.trim())
       .filter((v) => v.length > 0);
 
+    const durationRaw = document.getElementById("host-duration").value.trim();
+    let duration_minutes = null;
+    if (durationRaw) {
+      const parsed = parseInt(durationRaw, 10);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1440) {
+        errorEl.textContent = "Duration must be a whole number of minutes between 1 and 1440.";
+        return;
+      }
+      duration_minutes = parsed;
+    }
+
     if (!question || options.length < 2) {
       errorEl.textContent = "Enter a question and at least 2 non-empty options.";
       return;
     }
 
     try {
+      const body = { question, options };
+      if (duration_minutes !== null) body.duration_minutes = duration_minutes;
       const res = await fetch(`${BACKEND_URL}/polls`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, options }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -495,6 +529,7 @@
 
       document.getElementById("host-code").textContent = data.code;
       document.getElementById("host-question-display").textContent = data.poll.question;
+      renderExpiresLine("host-expires-line", data.poll.expires_at);
       document.getElementById("host-closed-banner").classList.add("hidden");
       document.getElementById("host-close-btn").disabled = false;
       document.getElementById("host-error").textContent = "";
@@ -619,6 +654,7 @@
 
   function renderParticipantOptions(poll) {
     document.getElementById("participant-question-display").textContent = poll.question;
+    renderExpiresLine("participant-expires-line", poll.expires_at);
 
     const optionsDiv = document.getElementById("participant-options");
     optionsDiv.innerHTML = "";
