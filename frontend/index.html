@@ -297,6 +297,7 @@
       <div class="code-display" id="host-code"></div>
       <div class="question-display" id="host-question-display"></div>
       <div class="status-line hidden" id="host-expires-line"></div>
+      <div class="status-line" id="host-participant-count"></div>
       <div id="host-tally"></div>
       <button type="button" class="btn-danger-outline" id="host-close-btn">Close Poll</button>
       <div class="error-line" id="host-error"></div>
@@ -530,6 +531,7 @@
       document.getElementById("host-code").textContent = data.code;
       document.getElementById("host-question-display").textContent = data.poll.question;
       renderExpiresLine("host-expires-line", data.poll.expires_at);
+      document.getElementById("host-participant-count").textContent = "0 participants connected";
       document.getElementById("host-closed-banner").classList.add("hidden");
       document.getElementById("host-close-btn").disabled = false;
       document.getElementById("host-error").textContent = "";
@@ -556,6 +558,10 @@
 
     hostSocket.on("tally_update", (tally) => {
       renderTallyBars(document.getElementById("host-tally"), tally);
+    });
+
+    hostSocket.on("participant_count", (data) => {
+      document.getElementById("host-participant-count").textContent = `${data.count} participant${data.count === 1 ? "" : "s"} connected`;
     });
 
     hostSocket.on("poll_closed", () => {

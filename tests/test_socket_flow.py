@@ -27,7 +27,15 @@ async def test_join_poll_then_submit_answer_broadcasts_tally_update(client, live
         )
         assert submit_ack == {"status": "ok"}
 
-        event_name, tally = await sio_client.receive(timeout=5)
+        # A "participant_count" broadcast (live presence, unrelated to this
+        # test) may also land in the room's event stream around join/submit;
+        # skip past it to find the tally_update we actually care about.
+        for _ in range(5):
+            event_name, tally = await sio_client.receive(timeout=5)
+            if event_name != "participant_count":
+                break
+        else:
+            raise AssertionError("never received 'tally_update' event")
         assert event_name == "tally_update"
 
         matching = next(t for t in tally if t["option_id"] == option_id)

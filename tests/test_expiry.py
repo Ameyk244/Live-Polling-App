@@ -67,7 +67,9 @@ async def test_submit_answer_rejected_after_poll_expires(client, live_server):
         # The participant is in the room, so expiry detection's own
         # poll_closed broadcast (fired inside enforce_expiry) arrives too —
         # possibly before the "error" ack for the rejected submit_answer.
-        # Drain until we see "error"; only "poll_closed" should precede it.
+        # A "participant_count" broadcast (live presence, unrelated to this
+        # test) may also land in the stream from having joined the room.
+        # Drain until we see "error"; only those two should precede it.
         seen = []
         for _ in range(5):
             event_name, payload = await sio_client.receive(timeout=5)
@@ -77,6 +79,6 @@ async def test_submit_answer_rejected_after_poll_expires(client, live_server):
             seen.append(event_name)
         else:
             raise AssertionError(f"never received 'error' event; saw: {seen}")
-        assert all(ev == "poll_closed" for ev in seen)
+        assert all(ev in ("poll_closed", "participant_count") for ev in seen)
     finally:
         await sio_client.disconnect()

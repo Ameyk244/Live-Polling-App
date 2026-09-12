@@ -12,6 +12,16 @@ from app.sockets import sio
 
 logger = logging.getLogger(__name__)
 
+# In-memory only, per-process, not distributed across workers — same caveat as
+# app/core/rate_limiter.py. Tracks which participant socket ids are currently
+# connected to each poll's room, purely for live presence display (not persisted).
+_participant_sids: dict[str, set[str]] = {}
+
+
+async def _broadcast_participant_count(poll_code: str) -> None:
+    count = len(_participant_sids.get(poll_code, set()))
+    await sio.emit("participant_count", {"count": count}, room=poll_code)
+
 
 def _poll_payload(poll) -> dict:
     return {
@@ -46,6 +56,10 @@ async def join_poll(sid, raw_payload):
 
         await sio.enter_room(sid, poll.code)
 
+        _participant_sids.setdefault(poll.code, set()).add(sid)
+        await sio.save_session(sid, {"poll_code": poll.code, "role": "participant"})
+        await _broadcast_participant_count(poll.code)
+
         poll_payload = _poll_payload(poll)
         return {
             "token": token,
@@ -63,6 +77,19 @@ async def join_poll(sid, raw_payload):
         )
     finally:
         db.close()
+
+
+@sio.on("disconnect")
+async def disconnect(sid):
+    try:
+        session = await sio.get_session(sid)
+    except Exception:
+        return
+    if session.get("role") == "participant":
+        poll_code = session.get("poll_code")
+        if poll_code:
+            _participant_sids.get(poll_code, set()).discard(sid)
+            await _broadcast_participant_count(poll_code)
 
 
 @sio.on("join_as_host")
