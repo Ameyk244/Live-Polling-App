@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -7,6 +7,9 @@ from app.database import get_db
 from app.schemas.poll import (
     CreatePollRequest,
     CreatePollResponse,
+    ExportOptionResult,
+    PollAnalyticsResponse,
+    PollExportResponse,
     PollResponse,
     PollResultsResponse,
 )
@@ -49,3 +52,48 @@ async def close_poll(
 ):
     poll = await poll_service.close_poll(db, code, credentials.credentials)
     return PollResponse.model_validate(poll)
+
+
+@router.get("/{code}/export")
+async def export_poll(
+    code: str,
+    format: str = "json",
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
+    poll, tally = await poll_service.get_export_data(db, code, credentials.credentials)
+
+    # Default to json on a missing/unrecognized format value rather than 422.
+    fmt = format.lower() if isinstance(format, str) else "json"
+    if fmt == "csv":
+        csv_body = poll_service.build_export_csv(poll, tally)
+        return Response(
+            content=csv_body,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="poll_{poll.code}.csv"'},
+        )
+
+    total_votes = sum(option.count for option in tally)
+    return PollExportResponse(
+        code=poll.code,
+        question=poll.question,
+        status=poll.status,
+        created_at=poll.created_at,
+        closed_at=poll.closed_at,
+        expires_at=poll.expires_at,
+        total_votes=total_votes,
+        options=[
+            ExportOptionResult(text=option.text, position=option.position, vote_count=option.count)
+            for option in tally
+        ],
+    )
+
+
+@router.get("/{code}/analytics", response_model=PollAnalyticsResponse)
+async def get_analytics(
+    code: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
+    data = await poll_service.get_poll_analytics(db, code, credentials.credentials)
+    return PollAnalyticsResponse(**data)

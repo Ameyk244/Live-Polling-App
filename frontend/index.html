@@ -305,6 +305,12 @@
   .hidden { display: none; }
   .error-line { color: var(--danger); font-size: 0.85rem; margin-top: 10px; min-height: 1em; }
   .status-line { font-size: 0.9rem; color: var(--ink-soft); margin-top: 10px; }
+  .export-row { display: flex; gap: 10px; margin-top: 16px; }
+  .export-row .btn-secondary { flex: 1; }
+  #host-analytics-toggle { width: 100%; margin-top: 10px; }
+  #host-analytics-panel { margin-top: 10px; padding: 16px; }
+  .analytics-line { font-size: 0.9rem; color: var(--ink); margin: 4px 0; }
+  .analytics-line strong { color: var(--ink-soft); font-weight: 500; }
   .closed-banner {
     margin-top: 16px;
     padding: 12px 14px;
@@ -406,6 +412,12 @@
       <div class="status-line hidden" id="host-expires-line"></div>
       <div class="status-line" id="host-participant-count"></div>
       <div id="host-tally"></div>
+      <div class="export-row">
+        <button type="button" class="btn-secondary" id="host-export-csv-btn">Export CSV</button>
+        <button type="button" class="btn-secondary" id="host-export-json-btn">Export JSON</button>
+      </div>
+      <button type="button" class="btn-secondary" id="host-analytics-toggle">View Analytics &#9662;</button>
+      <div class="card hidden" id="host-analytics-panel"></div>
       <button type="button" class="btn-danger-outline" id="host-close-btn">Close Poll</button>
       <div class="error-line" id="host-error"></div>
       <div class="closed-banner hidden" id="host-closed-banner">Poll Closed</div>
@@ -666,6 +678,8 @@
     if (participantSocket) { participantSocket.disconnect(); participantSocket = null; }
     hostToken = null;
     hostPollCode = null;
+    analyticsLoaded = false;
+    document.getElementById("host-analytics-panel").classList.add("hidden");
     participantToken = null;
     participantPollCode = null;
     hasAnswered = false;
@@ -800,6 +814,8 @@
 
       hostToken = data.host_token;
       hostPollCode = data.code;
+      analyticsLoaded = false;
+      document.getElementById("host-analytics-panel").classList.add("hidden");
 
       document.getElementById("host-code").textContent = data.code;
       renderHostJoinQr(data.code);
@@ -863,6 +879,85 @@
       }
       document.getElementById("host-closed-banner").classList.remove("hidden");
       document.getElementById("host-close-btn").disabled = true;
+    } catch (err) {
+      errorEl.textContent = "Could not reach backend: " + err.message;
+    }
+  });
+
+  // ---------- export (CSV/JSON) ----------
+  // Uses fetch() with the Authorization header (same as every other
+  // host-only call) rather than putting the host token in the URL, then
+  // triggers a browser download from the resulting blob.
+  async function downloadPollExport(format) {
+    const errorEl = document.getElementById("host-error");
+    errorEl.textContent = "";
+    try {
+      const res = await fetch(`${BACKEND_URL}/polls/${hostPollCode}/export?format=${format}`, {
+        headers: { Authorization: `Bearer ${hostToken}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        errorEl.textContent = data.message || "Failed to export poll.";
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `poll_${hostPollCode}.${format === "csv" ? "csv" : "json"}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      errorEl.textContent = "Could not reach backend: " + err.message;
+    }
+  }
+
+  document.getElementById("host-export-csv-btn").addEventListener("click", () => downloadPollExport("csv"));
+  document.getElementById("host-export-json-btn").addEventListener("click", () => downloadPollExport("json"));
+
+  // ---------- analytics panel ----------
+  let analyticsLoaded = false;
+
+  function renderAnalytics(data) {
+    const panel = document.getElementById("host-analytics-panel");
+    const fmtSeconds = (s) => (s === null || s === undefined ? "n/a" : `${s.toFixed(1)}s`);
+    const optionLines = data.tally
+      .map((t) => `<div class="analytics-line">&nbsp;&nbsp;${t.text}: <strong>${t.count}</strong></div>`)
+      .join("");
+    panel.innerHTML = `
+      <div class="analytics-line"><strong>Participants joined:</strong> ${data.participants_joined}</div>
+      <div class="analytics-line"><strong>Participants answered:</strong> ${data.participants_answered}</div>
+      <div class="analytics-line"><strong>Response rate:</strong> ${data.response_rate_percent.toFixed(1)}%</div>
+      <div class="analytics-line"><strong>Time to first vote:</strong> ${fmtSeconds(data.seconds_to_first_vote)}</div>
+      <div class="analytics-line"><strong>Time to last vote:</strong> ${fmtSeconds(data.seconds_to_last_vote)}</div>
+      <div class="analytics-line"><strong>Breakdown:</strong></div>
+      ${optionLines}
+    `;
+  }
+
+  document.getElementById("host-analytics-toggle").addEventListener("click", async () => {
+    const panel = document.getElementById("host-analytics-panel");
+    const errorEl = document.getElementById("host-error");
+    const willShow = panel.classList.contains("hidden");
+    if (!willShow) {
+      panel.classList.add("hidden");
+      return;
+    }
+    panel.classList.remove("hidden");
+    if (analyticsLoaded) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/polls/${hostPollCode}/analytics`, {
+        headers: { Authorization: `Bearer ${hostToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = data.message || "Failed to load analytics.";
+        return;
+      }
+      renderAnalytics(data);
+      analyticsLoaded = true;
     } catch (err) {
       errorEl.textContent = "Could not reach backend: " + err.message;
     }

@@ -56,3 +56,35 @@ class PollResultsResponse(BaseModel):
     question: str
     status: str
     tally: list[OptionTally]
+
+
+class ExportOptionResult(BaseModel):
+    text: str
+    position: int
+    vote_count: int
+
+
+class PollExportResponse(BaseModel):
+    code: str
+    question: str
+    status: str
+    created_at: datetime
+    closed_at: datetime | None
+    expires_at: datetime | None
+    total_votes: int
+    options: list[ExportOptionResult]
+
+
+class PollAnalyticsResponse(BaseModel):
+    code: str
+    question: str
+    status: str
+    participants_joined: int
+    participants_answered: int
+    response_rate_percent: float
+    # Reference point for time-to-first/last-vote: this app has no separate
+    # "publish" step, so poll creation and poll "open" are the same moment —
+    # created_at is therefore the simplest correct reference timestamp.
+    seconds_to_first_vote: float | None
+    seconds_to_last_vote: float | None
+    tally: list[OptionTally]

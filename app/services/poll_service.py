@@ -1,3 +1,5 @@
+import csv
+import io
 import logging
 import random
 import string
@@ -102,6 +104,68 @@ async def close_poll(db: Session, code: str, host_token: str) -> Poll:
     poll = await run_in_threadpool(_close_poll_sync, db, code, host_token)
     await sio.emit("poll_closed", {"code": poll.code}, room=poll.code)
     return poll
+
+
+def _authorize_host_for_poll_sync(db: Session, code: str, host_token: str) -> Poll:
+    """Fetch a poll and verify host_token is a host token for THIS poll —
+    same check as _close_poll_sync's key line, reused for read-only
+    host-only endpoints (export, analytics) that don't mutate the poll."""
+    poll = get_poll_by_code(db, code)
+    claims = auth_service.authorize_host(host_token, expected_poll_id=poll.id)
+    if claims.poll_id != poll.id:
+        raise UnauthorizedError("Token does not match this poll")
+    return poll
+
+
+async def get_export_data(db: Session, code: str, host_token: str) -> tuple[Poll, list[OptionTally]]:
+    poll = await run_in_threadpool(_authorize_host_for_poll_sync, db, code, host_token)
+    poll = await enforce_expiry(db, poll)
+    tally = await run_in_threadpool(get_tally, db, poll.id)
+    return poll, tally
+
+
+def build_export_csv(poll: Poll, tally: list[OptionTally]) -> str:
+    """One row per option (option_text,vote_count), with the question and
+    total votes surfaced as '#'-prefixed metadata lines above the data rows —
+    still valid, parseable CSV since csv readers treat them as ordinary rows
+    unless the caller chooses to skip '#' lines."""
+    total_votes = sum(option.count for option in tally)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([f"# question: {poll.question}"])
+    writer.writerow([f"# total_votes: {total_votes}"])
+    writer.writerow(["option_text", "vote_count"])
+    for option in tally:
+        writer.writerow([option.text, option.count])
+    return buffer.getvalue()
+
+
+async def get_poll_analytics(db: Session, code: str, host_token: str) -> dict:
+    poll = await run_in_threadpool(_authorize_host_for_poll_sync, db, code, host_token)
+    poll = await enforce_expiry(db, poll)
+    tally = await run_in_threadpool(get_tally, db, poll.id)
+    joined = await run_in_threadpool(participant_repository.count_participants, db, poll.id)
+    answered = await run_in_threadpool(answer_repository.count_answers, db, poll.id)
+    first_answer, last_answer = await run_in_threadpool(
+        answer_repository.get_first_and_last_answer_times, db, poll.id
+    )
+    response_rate = (answered / joined * 100) if joined > 0 else 0.0
+    # Reference point: poll.created_at. This app has no separate "publish"
+    # step — a poll is open from the moment it's created — so created_at is
+    # the simplest correct reference for time-to-first/last-vote.
+    seconds_to_first = (first_answer - poll.created_at).total_seconds() if first_answer else None
+    seconds_to_last = (last_answer - poll.created_at).total_seconds() if last_answer else None
+    return {
+        "code": poll.code,
+        "question": poll.question,
+        "status": poll.status,
+        "participants_joined": joined,
+        "participants_answered": answered,
+        "response_rate_percent": response_rate,
+        "seconds_to_first_vote": seconds_to_first,
+        "seconds_to_last_vote": seconds_to_last,
+        "tally": tally,
+    }
 
 
 async def join_poll(db: Session, poll_code: str, display_name: str) -> tuple[Poll, Participant, str]:

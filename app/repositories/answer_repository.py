@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -46,3 +48,18 @@ def get_tally(db: Session, poll_id: int) -> list[tuple[PollOption, int]]:
         .order_by(PollOption.position)
     )
     return list(db.execute(stmt).all())
+
+
+def count_answers(db: Session, poll_id: int) -> int:
+    stmt = select(func.count(Answer.id)).where(Answer.poll_id == poll_id)
+    return db.execute(stmt).scalar_one()
+
+
+def get_first_and_last_answer_times(
+    db: Session, poll_id: int
+) -> tuple[datetime | None, datetime | None]:
+    stmt = select(func.min(Answer.created_at), func.max(Answer.created_at)).where(
+        Answer.poll_id == poll_id
+    )
+    first, last = db.execute(stmt).one()
+    return first, last
