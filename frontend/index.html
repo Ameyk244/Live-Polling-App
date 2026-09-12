@@ -185,6 +185,31 @@
     border-radius: 10px;
     user-select: all;
   }
+  .code-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 4px 0 20px;
+  }
+  .code-row .code-display { flex: 1; margin: 0; }
+  .btn-copy-code {
+    flex: 0 0 auto;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--ink);
+    align-self: stretch;
+  }
+  .btn-copy-code:hover { border-color: var(--accent); color: var(--accent); }
+  .qr-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 20px;
+  }
+  .qr-block img, .qr-block canvas, .qr-block table { border-radius: 8px; }
+  .qr-caption { font-size: 0.8rem; color: var(--ink-soft); }
   .question-display {
     font-size: 1.2rem;
     font-weight: 600;
@@ -294,7 +319,14 @@
     </div>
 
     <div class="card hidden" id="host-live-block">
-      <div class="code-display" id="host-code"></div>
+      <div class="code-row">
+        <div class="code-display" id="host-code"></div>
+        <button type="button" class="btn-copy-code" id="host-copy-code-btn">Copy</button>
+      </div>
+      <div class="qr-block">
+        <div id="host-qr-code"></div>
+        <div class="qr-caption">Scan to join</div>
+      </div>
       <div class="question-display" id="host-question-display"></div>
       <div class="status-line hidden" id="host-expires-line"></div>
       <div class="status-line" id="host-participant-count"></div>
@@ -344,6 +376,8 @@
 
 <!-- Socket.IO client from CDN -->
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<!-- QR code generator from CDN (vanilla JS, no build step) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
   // The frontend is always served BY the same FastAPI app it talks to, so the
   // backend is whatever origin this page was loaded from — works unchanged
@@ -431,14 +465,15 @@
         setHostSubview("no-session");
       }
     } else if (name === "join" && code) {
-      showView("voting");
       if (participantToken && participantPollCode === code) {
+        showView("voting");
         setJoinSubview("live");
       } else {
-        document.getElementById("join-no-session-message").textContent =
-          `Session not found for poll ${code} — this view only works right ` +
-          `after joining the poll in this browser session.`;
-        setJoinSubview("no-session");
+        // No active in-session token for this code yet (e.g. someone scanning
+        // a QR code and landing here fresh) — send them to the join form with
+        // the code pre-filled instead of a dead-end "session not found" page.
+        showView("join-form");
+        document.getElementById("participant-code").value = code;
       }
     } else {
       showView("landing");
@@ -471,6 +506,38 @@
   let hostToken = null;
   let hostPollCode = null;
   let hostSocket = null;
+
+  // Renders (or re-renders) the "scan to join" QR code for a freshly created
+  // poll. qrcodejs clears/replaces its container's contents on each call, so
+  // it's safe to call this again if needed.
+  function renderHostJoinQr(code) {
+    const container = document.getElementById("host-qr-code");
+    container.innerHTML = "";
+    const joinUrl = `${window.location.origin}/#join/${code}`;
+    new QRCode(container, {
+      text: joinUrl,
+      width: 132,
+      height: 132,
+      colorDark: "#4f46e5",
+      colorLight: "#ffffff",
+    });
+  }
+
+  document.getElementById("host-copy-code-btn").addEventListener("click", async () => {
+    const btn = document.getElementById("host-copy-code-btn");
+    const code = document.getElementById("host-code").textContent;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      btn.textContent = "Copied!";
+      setTimeout(() => {
+        btn.textContent = "Copy";
+      }, 1500);
+    } catch (err) {
+      // Clipboard access can be denied/unavailable (e.g. non-HTTPS,
+      // non-localhost contexts) — fail silently rather than breaking the page.
+    }
+  });
 
   const hostOptionsDiv = document.getElementById("host-options");
 
@@ -529,6 +596,7 @@
       hostPollCode = data.code;
 
       document.getElementById("host-code").textContent = data.code;
+      renderHostJoinQr(data.code);
       document.getElementById("host-question-display").textContent = data.poll.question;
       renderExpiresLine("host-expires-line", data.poll.expires_at);
       document.getElementById("host-participant-count").textContent = "0 participants connected";
