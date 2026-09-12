@@ -1,0 +1,14 @@
+.env
+.env.local
+.venv/
+__pycache__/
+*.pyc
+polling.db
+*.db
+.pytest_cache/
+*.log
+.DS_Store
+node_modules/
+*.egg-info/
+package.json
+package-lock.json

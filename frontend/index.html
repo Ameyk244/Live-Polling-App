@@ -1,0 +1,661 @@
+<!--
+  Manual-testing / demo UI ONLY — not a production frontend.
+  Plain HTML/CSS/JS, no build step, no framework. Served by the backend itself at
+  http://127.0.0.1:8000/ (see app/main.py's StaticFiles mount). Consistent with this
+  project's CLAUDE.md scope notes.
+
+  Routing: "/" = landing choice screen. "#host/{code}" = host's live hosting view
+  (only reachable in-session, right after creating that poll in this tab/browser —
+  a host token can't be reconstructed from the URL alone, so a direct/refreshed load
+  at this hash shows a "session not found" message instead of erroring unclearly).
+  "#join/{code}" = participant's voting view, same in-session caveat.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Live Polling App — Demo</title>
+<style>
+  :root {
+    --accent: #4f46e5;
+    --accent-dark: #3f37c9;
+    --accent-soft: #eef0ff;
+    --ink: #1a1a1e;
+    --ink-soft: #5a5a63;
+    --border: #dfe0e6;
+    --bg: #f5f5f8;
+    --danger: #b3261e;
+    --danger-bg: #fdecea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .topbar {
+    padding: 16px 24px;
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: 0.01em;
+    color: var(--ink);
+  }
+  .topbar .dot { color: var(--accent); }
+  .page {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 12px 20px 60px;
+  }
+  .view.hidden { display: none; }
+
+  h1 { font-size: 1.6rem; margin: 0 0 6px; }
+  h2 { font-size: 1.15rem; margin: 0 0 16px; }
+  .subtitle { color: var(--ink-soft); margin: 0 0 32px; font-size: 0.95rem; }
+
+  .card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 2px rgba(20, 20, 40, 0.04);
+  }
+
+  /* ---------- landing ---------- */
+  .landing-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .choice-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-align: left;
+    width: 100%;
+    padding: 20px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  }
+  .choice-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.12);
+    transform: translateY(-1px);
+  }
+  .choice-icon {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    font-weight: 700;
+  }
+  .choice-title { display: block; font-weight: 600; font-size: 1.02rem; color: var(--ink); }
+  .choice-desc { display: block; font-size: 0.85rem; color: var(--ink-soft); margin-top: 2px; }
+
+  /* ---------- forms ---------- */
+  label { display: block; font-size: 0.85rem; margin: 14px 0 6px; color: var(--ink-soft); font-weight: 500; }
+  input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .option-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .option-row input { flex: 1; }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 8px;
+    font-size: 0.92rem;
+  }
+  .btn-primary {
+    display: inline-block;
+    margin-top: 18px;
+    padding: 10px 18px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    transition: background 0.15s ease;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-dark); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-secondary {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--ink);
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-danger-outline {
+    margin-top: 18px;
+    padding: 10px 18px;
+    border: 1px solid var(--danger);
+    background: #fff;
+    color: var(--danger);
+    font-weight: 600;
+  }
+  .btn-danger-outline:hover:not(:disabled) { background: var(--danger-bg); }
+  .btn-danger-outline:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .back-link {
+    display: inline-block;
+    margin-bottom: 16px;
+    color: var(--ink-soft);
+    font-size: 0.85rem;
+    text-decoration: none;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+  }
+  .back-link:hover { color: var(--accent); }
+
+  /* ---------- hosting / voting live views ---------- */
+  .code-display {
+    font-size: 2.4rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-align: center;
+    padding: 18px 10px;
+    margin: 4px 0 20px;
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+    border-radius: 10px;
+    user-select: all;
+  }
+  .question-display {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 0 0 20px;
+    line-height: 1.4;
+  }
+  .bar-row { margin: 14px 0; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 0.88rem; margin-bottom: 5px; font-weight: 500; }
+  .bar-track { background: #eef0f4; border-radius: 999px; overflow: hidden; height: 20px; }
+  .bar-fill {
+    background: var(--accent);
+    height: 100%;
+    border-radius: 999px;
+    width: 0%;
+    transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .option-choice {
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin-top: 10px;
+    padding: 12px 14px;
+    background: #fff;
+    color: var(--ink);
+    border: 1px solid var(--border);
+    font-weight: 500;
+  }
+  .option-choice:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+  .option-choice:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .hidden { display: none; }
+  .error-line { color: var(--danger); font-size: 0.85rem; margin-top: 10px; min-height: 1em; }
+  .status-line { font-size: 0.9rem; color: var(--ink-soft); margin-top: 10px; }
+  .closed-banner {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: var(--danger-bg);
+    color: var(--danger);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  .no-session-message {
+    color: var(--ink-soft);
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar"><span class="dot">●</span> Live Polling</div>
+
+<div class="page">
+
+  <!-- ==================== LANDING ==================== -->
+  <div class="view" id="view-landing">
+    <h1>Live Polling</h1>
+    <p class="subtitle">Create a quick poll, or join one with a code.</p>
+    <div class="landing-choices">
+      <button type="button" class="choice-card" id="btn-go-create">
+        <span class="choice-icon">+</span>
+        <span>
+          <span class="choice-title">Create a Poll</span>
+          <span class="choice-desc">Set a question, share the code, watch results live.</span>
+        </span>
+      </button>
+      <button type="button" class="choice-card" id="btn-go-join">
+        <span class="choice-icon">&#8594;</span>
+        <span>
+          <span class="choice-title">Join a Poll</span>
+          <span class="choice-desc">Enter a code from the host and cast your vote.</span>
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== HOST: CREATE FORM ==================== -->
+  <div class="view hidden" id="view-create-form">
+    <button type="button" class="back-link" id="create-back-link">&#8592; Back</button>
+    <div class="card">
+      <h2>Create a Poll</h2>
+      <label for="host-question">Question</label>
+      <input type="text" id="host-question" placeholder="What's your favorite color?" />
+
+      <label>Options</label>
+      <div id="host-options"></div>
+      <button type="button" class="btn-secondary" id="host-add-option">+ Add option</button>
+      <br />
+      <button type="button" class="btn-primary" id="host-create-btn">Create Poll</button>
+      <div class="error-line" id="host-create-error"></div>
+    </div>
+  </div>
+
+  <!-- ==================== HOST: HOSTING VIEW ==================== -->
+  <div class="view hidden" id="view-hosting">
+    <button type="button" class="back-link" id="host-start-over-link">&#8592; Start over</button>
+
+    <div class="card" id="host-no-session-block">
+      <h2>Host session not found</h2>
+      <p class="no-session-message" id="host-no-session-message"></p>
+    </div>
+
+    <div class="card hidden" id="host-live-block">
+      <div class="code-display" id="host-code"></div>
+      <div class="question-display" id="host-question-display"></div>
+      <div id="host-tally"></div>
+      <button type="button" class="btn-danger-outline" id="host-close-btn">Close Poll</button>
+      <div class="error-line" id="host-error"></div>
+      <div class="closed-banner hidden" id="host-closed-banner">Poll Closed</div>
+    </div>
+  </div>
+
+  <!-- ==================== PARTICIPANT: JOIN FORM ==================== -->
+  <div class="view hidden" id="view-join-form">
+    <button type="button" class="back-link" id="join-back-link">&#8592; Back</button>
+    <div class="card">
+      <h2>Join a Poll</h2>
+      <label for="participant-code">Poll code</label>
+      <input type="text" id="participant-code" placeholder="e.g. 3F9K2A" />
+
+      <label for="participant-name">Display name</label>
+      <input type="text" id="participant-name" placeholder="Your name" />
+
+      <button type="button" class="btn-primary" id="participant-join-btn">Join</button>
+      <div class="error-line" id="participant-join-error"></div>
+    </div>
+  </div>
+
+  <!-- ==================== PARTICIPANT: VOTING VIEW ==================== -->
+  <div class="view hidden" id="view-voting">
+    <button type="button" class="back-link" id="join-start-over-link">&#8592; Start over</button>
+
+    <div class="card" id="join-no-session-block">
+      <h2>Session not found</h2>
+      <p class="no-session-message" id="join-no-session-message"></p>
+    </div>
+
+    <div class="card hidden" id="join-live-block">
+      <div class="question-display" id="participant-question-display"></div>
+      <div id="participant-options"></div>
+      <div class="status-line" id="participant-status"></div>
+      <div class="error-line" id="participant-error"></div>
+      <div class="closed-banner hidden" id="participant-closed-banner">This poll has ended</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Socket.IO client from CDN -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+  // Change this if the backend runs somewhere other than localhost:8000.
+  const BACKEND_URL = "http://127.0.0.1:8000";
+
+  // ---------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function renderTallyBars(container, tally) {
+    container.innerHTML = "";
+    const total = tally.reduce((sum, t) => sum + t.count, 0) || 1;
+    const sorted = [...tally].sort((a, b) => a.position - b.position);
+    for (const t of sorted) {
+      const pct = Math.round((t.count / total) * 100);
+      const row = document.createElement("div");
+      row.className = "bar-row";
+      row.innerHTML = `
+        <div class="bar-label"><span>${escapeHtml(t.text)}</span><span>${t.count}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:0%"></div></div>
+      `;
+      container.appendChild(row);
+      // Set width on the next frame so the CSS transition actually animates
+      // instead of jumping straight to its final value.
+      requestAnimationFrame(() => {
+        row.querySelector(".bar-fill").style.width = pct + "%";
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // View routing
+  // ---------------------------------------------------------------------
+  const VIEW_IDS = ["landing", "create-form", "hosting", "join-form", "voting"];
+
+  function showView(name) {
+    for (const id of VIEW_IDS) {
+      document.getElementById("view-" + id).classList.toggle("hidden", id !== name);
+    }
+  }
+
+  function setHostSubview(mode) {
+    document.getElementById("host-no-session-block").classList.toggle("hidden", mode !== "no-session");
+    document.getElementById("host-live-block").classList.toggle("hidden", mode !== "live");
+  }
+
+  function setJoinSubview(mode) {
+    document.getElementById("join-no-session-block").classList.toggle("hidden", mode !== "no-session");
+    document.getElementById("join-live-block").classList.toggle("hidden", mode !== "live");
+  }
+
+  function route() {
+    const hash = location.hash.replace(/^#/, "");
+    const [name, code] = hash.split("/");
+
+    if (name === "host" && code) {
+      showView("hosting");
+      if (hostToken && hostPollCode === code) {
+        setHostSubview("live");
+      } else {
+        document.getElementById("host-no-session-message").textContent =
+          `Host session not found for poll ${code} — this view only works right ` +
+          `after creating the poll in this browser session.`;
+        setHostSubview("no-session");
+      }
+    } else if (name === "join" && code) {
+      showView("voting");
+      if (participantToken && participantPollCode === code) {
+        setJoinSubview("live");
+      } else {
+        document.getElementById("join-no-session-message").textContent =
+          `Session not found for poll ${code} — this view only works right ` +
+          `after joining the poll in this browser session.`;
+        setJoinSubview("no-session");
+      }
+    } else {
+      showView("landing");
+    }
+  }
+
+  function goToLanding() {
+    if (hostSocket) { hostSocket.disconnect(); hostSocket = null; }
+    if (participantSocket) { participantSocket.disconnect(); participantSocket = null; }
+    hostToken = null;
+    hostPollCode = null;
+    participantToken = null;
+    participantPollCode = null;
+    hasAnswered = false;
+    location.hash = "";
+    showView("landing");
+  }
+
+  window.addEventListener("hashchange", route);
+  document.getElementById("btn-go-create").addEventListener("click", () => showView("create-form"));
+  document.getElementById("btn-go-join").addEventListener("click", () => showView("join-form"));
+  document.getElementById("create-back-link").addEventListener("click", () => showView("landing"));
+  document.getElementById("join-back-link").addEventListener("click", () => showView("landing"));
+  document.getElementById("host-start-over-link").addEventListener("click", goToLanding);
+  document.getElementById("join-start-over-link").addEventListener("click", goToLanding);
+
+  // ---------------------------------------------------------------------
+  // HOST FLOW
+  // ---------------------------------------------------------------------
+  let hostToken = null;
+  let hostPollCode = null;
+  let hostSocket = null;
+
+  const hostOptionsDiv = document.getElementById("host-options");
+
+  function addHostOptionInput(prefill = "") {
+    const row = document.createElement("div");
+    row.className = "option-row";
+    row.innerHTML = `<input type="text" class="host-option-input" placeholder="Option text" />`;
+    hostOptionsDiv.appendChild(row);
+    if (prefill) row.querySelector("input").value = prefill;
+  }
+  addHostOptionInput();
+  addHostOptionInput();
+
+  document.getElementById("host-add-option").addEventListener("click", () => addHostOptionInput());
+
+  document.getElementById("host-create-btn").addEventListener("click", async () => {
+    const errorEl = document.getElementById("host-create-error");
+    errorEl.textContent = "";
+
+    const question = document.getElementById("host-question").value.trim();
+    const options = Array.from(document.querySelectorAll(".host-option-input"))
+      .map((el) => el.value.trim())
+      .filter((v) => v.length > 0);
+
+    if (!question || options.length < 2) {
+      errorEl.textContent = "Enter a question and at least 2 non-empty options.";
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/polls`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, options }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = data.message || "Failed to create poll.";
+        return;
+      }
+
+      hostToken = data.host_token;
+      hostPollCode = data.code;
+
+      document.getElementById("host-code").textContent = data.code;
+      document.getElementById("host-question-display").textContent = data.poll.question;
+      document.getElementById("host-closed-banner").classList.add("hidden");
+      document.getElementById("host-close-btn").disabled = false;
+      document.getElementById("host-error").textContent = "";
+
+      showView("hosting");
+      setHostSubview("live");
+      connectHostSocket();
+      location.hash = "#host/" + data.code;
+    } catch (err) {
+      errorEl.textContent = "Could not reach backend: " + err.message;
+    }
+  });
+
+  function connectHostSocket() {
+    hostSocket = io(BACKEND_URL);
+
+    hostSocket.on("connect", () => {
+      hostSocket.emit("join_as_host", { token: hostToken }, (ack) => {
+        if (ack && ack.poll) {
+          renderTallyBars(document.getElementById("host-tally"), ack.tally);
+        }
+      });
+    });
+
+    hostSocket.on("tally_update", (tally) => {
+      renderTallyBars(document.getElementById("host-tally"), tally);
+    });
+
+    hostSocket.on("poll_closed", () => {
+      document.getElementById("host-closed-banner").classList.remove("hidden");
+      document.getElementById("host-close-btn").disabled = true;
+    });
+
+    hostSocket.on("error", (err) => {
+      document.getElementById("host-error").textContent = err.message || "Something went wrong.";
+    });
+  }
+
+  document.getElementById("host-close-btn").addEventListener("click", async () => {
+    const errorEl = document.getElementById("host-error");
+    errorEl.textContent = "";
+    try {
+      const res = await fetch(`${BACKEND_URL}/polls/${hostPollCode}/close`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${hostToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = data.message || "Failed to close poll.";
+        return;
+      }
+      document.getElementById("host-closed-banner").classList.remove("hidden");
+      document.getElementById("host-close-btn").disabled = true;
+    } catch (err) {
+      errorEl.textContent = "Could not reach backend: " + err.message;
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // PARTICIPANT FLOW
+  // ---------------------------------------------------------------------
+  let participantToken = null;
+  let participantPollCode = null;
+  let participantSocket = null;
+  let hasAnswered = false;
+
+  document.getElementById("participant-join-btn").addEventListener("click", () => {
+    const errorEl = document.getElementById("participant-join-error");
+    errorEl.textContent = "";
+
+    const pollCode = document.getElementById("participant-code").value.trim().toUpperCase();
+    const displayName = document.getElementById("participant-name").value.trim();
+
+    if (!pollCode || !displayName) {
+      errorEl.textContent = "Enter a poll code and a display name.";
+      return;
+    }
+
+    participantSocket = io(BACKEND_URL);
+
+    participantSocket.on("connect", () => {
+      participantSocket.emit(
+        "join_poll",
+        { poll_code: pollCode, display_name: displayName },
+        (ack) => {
+          if (!ack || !ack.token) {
+            // Server-side failure is reported via the "error" event handler below.
+            return;
+          }
+          participantToken = ack.token;
+          participantPollCode = pollCode;
+          hasAnswered = false;
+
+          document.getElementById("participant-closed-banner").classList.add("hidden");
+          document.getElementById("participant-status").textContent = "";
+          document.getElementById("participant-error").textContent = "";
+          renderParticipantOptions(ack.poll);
+
+          showView("voting");
+          setJoinSubview("live");
+          location.hash = "#join/" + pollCode;
+        }
+      );
+    });
+
+    participantSocket.on("error", (err) => {
+      const msg = err.message || "Something went wrong.";
+      const joinErrorEl = document.getElementById("participant-join-error");
+      const liveErrorEl = document.getElementById("participant-error");
+      if (participantToken) {
+        liveErrorEl.textContent = msg;
+      } else {
+        joinErrorEl.textContent = msg;
+      }
+    });
+
+    participantSocket.on("poll_closed", () => {
+      document.getElementById("participant-closed-banner").classList.remove("hidden");
+      document.querySelectorAll(".option-choice").forEach((btn) => (btn.disabled = true));
+    });
+  });
+
+  function renderParticipantOptions(poll) {
+    document.getElementById("participant-question-display").textContent = poll.question;
+
+    const optionsDiv = document.getElementById("participant-options");
+    optionsDiv.innerHTML = "";
+    const sorted = [...poll.options].sort((a, b) => a.position - b.position);
+    for (const opt of sorted) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "option-choice";
+      btn.textContent = opt.text;
+      btn.addEventListener("click", () => submitAnswer(opt.id));
+      optionsDiv.appendChild(btn);
+    }
+  }
+
+  function submitAnswer(optionId) {
+    if (hasAnswered) return;
+    document.getElementById("participant-error").textContent = "";
+
+    participantSocket.emit(
+      "submit_answer",
+      { token: participantToken, option_id: optionId },
+      (ack) => {
+        if (ack && ack.status === "ok") {
+          hasAnswered = true;
+          document.querySelectorAll(".option-choice").forEach((btn) => (btn.disabled = true));
+          document.getElementById("participant-status").textContent =
+            "Thanks — your answer was recorded.";
+        }
+        // A failure ack (undefined/null) is reported via the "error" event handler.
+      }
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Initial route (handles a fresh "/" load and a direct/refreshed
+  // "#host/{code}" or "#join/{code}" load, e.g. from a bookmark).
+  // ---------------------------------------------------------------------
+  route();
+</script>
+
+</body>
+</html>
